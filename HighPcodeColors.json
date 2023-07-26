@@ -1,0 +1,61 @@
+{
+  "name": "HighPcodeColors",
+  "comment": "",
+  "javadoc": "",
+  "static": true,
+  "implements": [],
+  "extends": "java.lang.Object",
+  "fields": [
+    {
+      "name": "LABEL",
+      "comment": "",
+      "javadoc": "",
+      "static": true,
+      "type_long": "generic.theme.GColor",
+      "type_short": "GColor",
+      "constant_value": null
+    },
+    {
+      "name": "ADDRESS_SPACE",
+      "comment": "",
+      "javadoc": "",
+      "static": true,
+      "type_long": "generic.theme.GColor",
+      "type_short": "GColor",
+      "constant_value": null
+    },
+    {
+      "name": "VARNODE",
+      "comment": "",
+      "javadoc": "",
+      "static": true,
+      "type_long": "generic.theme.GColor",
+      "type_short": "GColor",
+      "constant_value": null
+    },
+    {
+      "name": "USEROP",
+      "comment": "",
+      "javadoc": "",
+      "static": true,
+      "type_long": "generic.theme.GColor",
+      "type_short": "GColor",
+      "constant_value": null
+    }
+  ],
+  "methods": [
+    {
+      "name": "\u003cinit\u003e",
+      "comment": "",
+      "javadoc": "",
+      "static": false,
+      "params": [],
+      "return": {
+        "type_long": "void",
+        "type_short": "void",
+        "comment": ""
+      },
+      "throws": []
+    }
+  ]
+}
