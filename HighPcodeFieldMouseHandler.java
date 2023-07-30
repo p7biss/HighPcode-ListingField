@@ -40,10 +40,6 @@ public class HighPcodeFieldMouseHandler implements FieldMouseHandlerExtension {
 		HighPcodeFieldLocation highPcodeLocation = (HighPcodeFieldLocation) programLocation;
 		List<String> highPcodeStrings = highPcodeLocation.getHighPcodeStrings();
 		int row = highPcodeLocation.getRow();
-
-		//System.out.print("fieldElementClicked : highPcodeLocation.getAddress = " + highPcodeLocation.getAddress() + "\n");
-		//System.out.print("fieldElementClicked : aantal highPcodeStrings = " + highPcodeStrings.size() + "\n");
-		//System.out.print("fieldElementClicked : getRow() = " + row + "\n");
 		
 		String highPcodeString = highPcodeStrings.get(row);
 		int column = highPcodeLocation.getCharOffset();
