@@ -15,25 +15,29 @@
  */
 package ghidra.app.util.viewer.field;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.math.BigInteger;
-import java.time.LocalDateTime;
 
 import docking.widgets.fieldpanel.field.*;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import ghidra.GhidraOptions;
 import ghidra.app.util.ListingHighlightProvider;
-import ghidra.app.util.pcode.AttributedStringPcodeFormatter;
+import ghidra.app.util.pcode.AttributedStringHighPcodeFormatter;
 import ghidra.app.util.viewer.field.ListingColors.HighPcodeColors;
 import ghidra.app.util.viewer.field.ListingColors.MnemonicColors; 
 import ghidra.app.util.viewer.format.FieldFormatModel;
 import ghidra.app.util.viewer.options.OptionsGui;
-import ghidra.app.util.viewer.proxy.*;
+import ghidra.app.util.viewer.proxy.ProxyObj;
 import ghidra.framework.options.Options;
 import ghidra.framework.options.ToolOptions;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.lang.Register;
-import ghidra.program.model.listing.*;
+import ghidra.program.model.listing.CodeUnit;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.PcodeBlockBasic;
@@ -56,22 +60,18 @@ public class HighPcodeFieldFactory extends FieldFactory {
 	private final static String GROUP_TITLE = "HighPcode Field";
 	public final static String DISPLAY_ALTERNATIVE_SYNTAX =
 			GROUP_TITLE + Options.DELIMITER + "Display Alternative Syntax";
-	public static final String DISPLAY_RAW_HIGHPCODE =
-			GROUP_TITLE + Options.DELIMITER + "Display Raw HighPcode";
 	public final static String MAX_DISPLAY_LINES_MSG =
 			GROUP_TITLE + Options.DELIMITER + "Maximum Lines To Display";
 
 	public final static int MAX_DISPLAY_LINES = 50;
 	public final static boolean DEBUG_MODE = false;
 
-	private AttributedStringPcodeFormatter formatter;
 	boolean displayAlternativeSyntax = true;
 	int maxDisplayLines = Integer.MAX_VALUE;
 
-	//private Function funcGlobal;   WEGWEGWEG
-	private HighFunction highGlobal;
-	//private Instruction instruction;   WEGWEGWEG
-
+	private Program program;
+	private AttributedStringHighPcodeFormatter formatter;
+	
 	public HighPcodeFieldFactory() {
 		super(FIELD_NAME);
 		setWidth(300);
@@ -84,7 +84,7 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		setWidth(300);
 
 		style = displayOptions.getInt(OptionsGui.BYTES.getStyleOptionName(), -1);
-		formatter = new AttributedStringPcodeFormatter();
+		formatter = new AttributedStringHighPcodeFormatter();
 
 		setOptions(fieldOptions);
 		formatter.setFontMetrics(getMetrics());
@@ -105,41 +105,38 @@ public class HighPcodeFieldFactory extends FieldFactory {
 			return null;
 		}
 		Instruction instruction = (Instruction) obj;
-
+		
+		program = instruction.getProgram();   // NEWNEWNEW
+		
 		if(DEBUG_MODE){
 			System.out.print("\n---------------------------------------------------------------- ");
-			System.out.print("\n-------------- HighPcodeFieldFactory() getField() -------------- " + LocalDateTime.now().toLocalTime());
+			System.out.print("\n-------------- HighPcodeFieldFactory() getField() -------------- ");
 			System.out.print("\n------------- instruction address = " + instruction.getAddress() + "------------------- ");
 			System.out.print("\n---------------------------------------------------------------- \n");
 		}
 		DecompInterface ifc = new DecompInterface();
-		DecompileOptions options = new DecompileOptions();   // WAAROM NODIG?
+		DecompileOptions options = new DecompileOptions();
 		ifc.setOptions(options);
 
-		//FlatProgramAPI flat = new FlatProgramAPI (instruction.getProgram());   WEGWEGWEG
-		//Function func = flat.getFunctionContaining(instruction.getAddress());  WEGWEGWEG
-		
-		// ZOUDEN WE DIT WILLEN: ?
-		
+		HighFunction highFunc = null;
 		Function func = getFunc(instruction);
-
+		
 		if (func == null) {
 			System.out.print("(func == null): No Function at current location\n");
 			return null;
 		}
 		try {
-			highGlobal = getHighFunc(instruction);
+			highFunc = getHighFunc(instruction);
 		} catch (DecompileException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 
 		ArrayList<TextFieldElement> textFieldElements = new ArrayList<>();
-		List<PcodeOp> highPcodeOpList = getHighPcode(highGlobal, instruction.getAddress());
+		List<PcodeOp> highPcodeOps = getHighPcodeOps(highFunc, instruction.getAddress());
 
-		if (displayAlternativeSyntax) {  // show alternative syntax (identical to 'Graph Control Flow' syntax)
-			//List<PcodeOp> pcodeOpList = getHighPcode(instruction.getAddress());
-			PcodeOp[] pcodeOpArray = highPcodeOpList.toArray(new PcodeOp[highPcodeOpList.size()]);
+		if (displayAlternativeSyntax) {  // display alternative syntax (identical to 'Graph Control Flow' syntax)
+			PcodeOp[] pcodeOpArray = highPcodeOps.toArray(new PcodeOp[highPcodeOps.size()]);
 
 			int lineCnt = pcodeOpArray.length;
 			for (int i = 0 ; i < lineCnt && i < maxDisplayLines ; i++) {
@@ -147,10 +144,9 @@ public class HighPcodeFieldFactory extends FieldFactory {
 				textFieldElements.add(new TextFieldElement(as, i, 0));
 			}
 		}
-		else {  // show Pcode syntax
+		else {  // display Pcode syntax
 			List<AttributedString> highPcodeListing = formatter.formatOps(instruction.getProgram().getLanguage(),
-					//instruction.getProgram().getAddressFactory(), getHighPcode(instruction.getAddress()));
-					instruction.getProgram().getAddressFactory(), highPcodeOpList);
+					instruction.getProgram().getAddressFactory(), highPcodeOps);
 
 			int lineCnt = highPcodeListing.size();
 			for (int i = 0; i < lineCnt; i++) {
@@ -166,17 +162,15 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		return null;
 	}
 
-	List<PcodeOp> getHighPcode(HighFunction hf, Address address) {    // HighFunction ook maar toegevoegd..
+	List<PcodeOp> getHighPcodeOps(HighFunction hf, Address address) {
 		List<PcodeOp> highPcodeOps = new ArrayList<>();
 
-		//Iterator<PcodeBlockBasic> pblockIter = hfunc.getBasicBlocks().iterator();
 		Iterator<PcodeBlockBasic> pblockIter = hf.getBasicBlocks().iterator();
-		
+
 		if(DEBUG_MODE){
 			System.out.print("getHighPcode : address = " + address + "\n");
-			//System.out.print("getHighPcode : hf = " + hf.toString() + "\n");
 		}
-		
+
 		while (pblockIter.hasNext()) {
 			PcodeBlockBasic block = pblockIter.next();
 			Iterator<PcodeOp> opIter = block.getIterator();
@@ -184,11 +178,11 @@ public class HighPcodeFieldFactory extends FieldFactory {
 			while (opIter.hasNext()) {
 				PcodeOp op = opIter.next();
 				Address op_address = op.getSeqnum().getTarget();
-				
+
 				if(DEBUG_MODE){
 					System.out.print("getHighPcode : op_address = " + op_address + "\n");
 				}
-				
+
 				if (op_address.equals(address)) {
 					highPcodeOps.add(op);
 				}
@@ -207,7 +201,7 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		}
 		lineList.add(formatOpMnemonic(op));
 		lineList.add(new AttributedString(" ", ListingColors.SEPARATOR, getMetrics()));
-		
+
 		Varnode[] inputs = op.getInputs();
 		for (int i = 0; i < inputs.length; i++) {
 			if (i != 0) {
@@ -249,7 +243,6 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		if (node == null) {
 			return new AttributedString("null", ListingColors.REF_BAD, getMetrics());
 		}
-		Program prog = highGlobal.getFunction().getProgram();
 		Address addr = node.getAddress();
 		if (node.isConstant()) {
 			String str = "#" + NumericUtilities.toHexString(addr.getOffset(), node.getSize());
@@ -260,9 +253,9 @@ public class HighPcodeFieldFactory extends FieldFactory {
 			return new AttributedString(str, HighPcodeColors.VARNODE, getMetrics());
 		}
 		else if (addr.isRegisterAddress()) {
-			Register reg = prog.getRegister(addr, node.getSize());
+			Register reg = program.getRegister(addr, node.getSize());
 			if (reg == null) {
-				reg = prog.getRegister(addr);
+				reg = program.getRegister(addr);
 			}
 			if (reg != null) {
 				return new AttributedString(reg.getName(), ListingColors.REGISTER, getMetrics());
@@ -297,54 +290,40 @@ public class HighPcodeFieldFactory extends FieldFactory {
 
 	@Override
 	public ProgramLocation getProgramLocation(int row, int col, ListingField listingField) {
-
 		ProxyObj<?> proxy = listingField.getProxy();
 		Object obj = proxy.getObject();
 
 		if (!(obj instanceof Instruction)) {
 			return null;
 		}
-
 		if (row < 0 || col < 0) {
 			return null;
 		}
 
 		Instruction instr = (Instruction) obj;
-		Program program = instr.getProgram();
+		Program prog = instr.getProgram();
 		HighFunction highFunc = null;
-		
-		try {  /// ZOJUIST TOEGEVOEGD    .................................
+
+		try {
 			highFunc = getHighFunc(instr);
 		} catch (DecompileException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-		
-		
-		if(DEBUG_MODE){
-			System.out.print("getProgramLocation : highFunc = " + highFunc.toString() + "\n");
-		}
 
-		//List<PcodeOp> dinges = getHighPcode(highFunc, instr.getAddress());    // WEGWEGWEG
-		
-		if(DEBUG_MODE){
-			System.out.print("getProgramLocation : getHighPcode(..) = " + getHighPcode(highFunc, instr.getAddress()) + "\n");
-		}
-
-		
-		List<AttributedString> attributedStrings = formatter.formatOps(program.getLanguage(),
-				//program.getAddressFactory(), getHighPcode(instr.getAddress()));
-				program.getAddressFactory(), getHighPcode(highFunc, instr.getAddress()));
+		List<AttributedString> attributedStrings = formatter.formatOps(prog.getLanguage(),
+				prog.getAddressFactory(), getHighPcodeOps(highFunc, instr.getAddress()));
 		List<String> strings = new ArrayList<>(attributedStrings.size());
 		for (AttributedString attributedString : attributedStrings) {
 			strings.add(attributedString.getText());
 		}
+
 		if(DEBUG_MODE){
+			System.out.print("getProgramLocation : highFunc = " + highFunc.toString() + "\n");
+			System.out.print("getProgramLocation : getHighPcode(..) = " + getHighPcodeOps(highFunc, instr.getAddress()) + "\n");
 			System.out.print("getProgramLocation : strings = " + strings + "\n");
 		}
-
-		//return new HighPcodeFieldLocation(program, instr.getMinAddress(), strings, row, col);   // ORIG; maar klopt dit wel?  WEGWEGWEG
-		return new HighPcodeFieldLocation(program, instr.getAddress(), strings, row, col);
+		return new HighPcodeFieldLocation(prog, instr.getAddress(), strings, row, col);
 	}
 
 	@Override
@@ -367,9 +346,7 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		super.fieldOptionsChanged(options, optionName, oldValue, newValue);
 
 		if (options.getName().equals(GhidraOptions.CATEGORY_BROWSER_FIELDS)) {
-			if (optionName.equals(MAX_DISPLAY_LINES_MSG)
-					|| optionName.equals(DISPLAY_RAW_HIGHPCODE)
-					|| optionName.equals(DISPLAY_ALTERNATIVE_SYNTAX)) {
+			if (optionName.equals(MAX_DISPLAY_LINES_MSG) || optionName.equals(DISPLAY_ALTERNATIVE_SYNTAX)) {
 				setOptions(options);
 				model.update();
 			}
@@ -379,28 +356,20 @@ public class HighPcodeFieldFactory extends FieldFactory {
 	private void setOptions(Options fieldOptions) {
 		fieldOptions.registerOption(DISPLAY_ALTERNATIVE_SYNTAX, true, null,
 				"Alternative syntax like in Graph Control Flow");
-		fieldOptions.registerOption(DISPLAY_RAW_HIGHPCODE, false, null,
-				"Display raw High Pcode (only affects standard High Pcode syntax)");
 		fieldOptions.registerOption(MAX_DISPLAY_LINES_MSG, MAX_DISPLAY_LINES, null,
 				"Max number line of High Pcode to display");
 
 		displayAlternativeSyntax = fieldOptions.getBoolean(DISPLAY_ALTERNATIVE_SYNTAX, true);
-		boolean displayRaw = fieldOptions.getBoolean(DISPLAY_RAW_HIGHPCODE, false);
 		maxDisplayLines = fieldOptions.getInt(MAX_DISPLAY_LINES_MSG, MAX_DISPLAY_LINES);
-
-		formatter.setOptions(maxDisplayLines, displayRaw);
+		
+		formatter.setOptions(maxDisplayLines, false);
 	}
 
 	private Function getFunc(Instruction instr) {
 		FlatProgramAPI flat = new FlatProgramAPI (instr.getProgram());
-		
-		//return flat.getFunctionContaining(instr.getAddress();    NOG AANPASSEN; HIERONDER WEG DUS
-		
-		Function func = flat.getFunctionContaining(instr.getAddress());
-		return func;
+		return flat.getFunctionContaining(instr.getAddress());
 	}
-	
-	
+
 	private HighFunction getHighFunc(Instruction instr) throws DecompileException {
 		DecompileOptions options = new DecompileOptions();
 		DecompInterface ifc = new DecompInterface();
@@ -411,13 +380,10 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		}
 		ifc.setSimplificationStyle("decompile"); // show HighVar names
 		//ifc.setSimplificationStyle("normalize");
-		
-		//FlatProgramAPI flat = new FlatProgramAPI (instr.getProgram());       // VERVANGEN DOOR getFunction()..
-		//Function function = flat.getFunctionContaining(instr.getAddress());  // VERVANGEN DOOR getFunction()..
-		
+
 		Function function = getFunc(instr);
 
-		DecompileResults res = ifc.decompileFunction(function, 30, null);  // hierbij de globale func vervangen door lokale (+flat geintroduceerd)
+		DecompileResults res = ifc.decompileFunction(function, 30, null);
 		return res.getHighFunction();
 	}
 }
