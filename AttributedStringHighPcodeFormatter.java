@@ -36,7 +36,6 @@ public class AttributedStringHighPcodeFormatter extends
 	
 	public AttributedStringHighPcodeFormatter() {
 		initPunctuation();
-		System.out.print("***** AttributedStringHighPcodeFormatter() *****\n");
 	}
 
 	public void setFontMetrics(FontMetrics metrics) {
