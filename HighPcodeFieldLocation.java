@@ -29,8 +29,6 @@ public class HighPcodeFieldLocation extends ProgramLocation {
 			int charOffset) {
 		super(program, addr, row, 0, charOffset);
 		
-		//System.out.print("HighPcodeFieldLocation : highPcodeStrings = " + highPcodeStrings + "\n");
-		
 		this.highPcodeStrings = highPcodeStrings;
 	}
 
