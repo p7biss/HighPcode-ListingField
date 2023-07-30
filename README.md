@@ -15,6 +15,4 @@ Two HighPcode syntax styles are supported:
 
 The preferred syntax style can be set in: Options - Listing Fields - HighPcode Field.
 
-I have not yet figured out if/how it is possible to use Pcode syntax style combined with HighPcode colors.
-
-Note: In sources there are some Dutch comments visible and some commented code that should be removed. i will do that in the next version.
+AttributedStringHighPcodeFormatter.java is similar to AttributedStringPcodeFormatter.java, so code is basically duplicated.
