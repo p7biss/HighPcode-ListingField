@@ -10,8 +10,8 @@ Like the other ListingFields the functionality supports:
 
 Remarks:
 Two HighPcode syntax styles are supported:
-- 'alternative' syntax like Decompile window - arrow down (menu) - 'Graph Control Flow'. Using HighPcode colors.
-- Pcode syntax. Using HighPcode colors.
+- 'alternative' syntax like Decompile window - arrow down (menu) - 'Graph Control Flow'.
+- Pcode syntax.
 
 The preferred syntax style can be set in: Options - Listing Fields - HighPcode Field.
 
