@@ -23,6 +23,10 @@ import java.math.BigInteger;
 import docking.widgets.fieldpanel.field.*;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import ghidra.GhidraOptions;
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileException;
+import ghidra.app.decompiler.DecompileOptions;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.ListingHighlightProvider;
 import ghidra.app.util.pcode.AttributedStringHighPcodeFormatter;
 import ghidra.app.util.viewer.field.ListingColors.HighPcodeColors;
@@ -32,6 +36,7 @@ import ghidra.app.util.viewer.options.OptionsGui;
 import ghidra.app.util.viewer.proxy.ProxyObj;
 import ghidra.framework.options.Options;
 import ghidra.framework.options.ToolOptions;
+import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.lang.Register;
 import ghidra.program.model.listing.CodeUnit;
@@ -45,11 +50,6 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.util.ProgramLocation;
 import ghidra.util.NumericUtilities;
-import ghidra.app.decompiler.DecompInterface;
-import ghidra.app.decompiler.DecompileException;
-import ghidra.app.decompiler.DecompileOptions;
-import ghidra.app.decompiler.DecompileResults;
-import ghidra.program.flatapi.FlatProgramAPI;
 
 /**
  * HighPcode field factory.
@@ -64,14 +64,23 @@ public class HighPcodeFieldFactory extends FieldFactory {
 			GROUP_TITLE + Options.DELIMITER + "Maximum Lines To Display";
 
 	public final static int MAX_DISPLAY_LINES = 50;
-	public final static boolean DEBUG_MODE = false;
 
 	boolean displayAlternativeSyntax = true;
 	int maxDisplayLines = Integer.MAX_VALUE;
 
 	private Program program;
 	private AttributedStringHighPcodeFormatter formatter;
-	
+
+	class PcodeOpPlusMessage {   // used for the alternative syntax
+		PcodeOp pcodeOp = null;
+		String  message = null;  // to store message related to pcodeOp (if any)
+
+		public PcodeOpPlusMessage(PcodeOp op, String msg) {
+			pcodeOp = op;
+			message = msg;
+		}
+	}
+
 	public HighPcodeFieldFactory() {
 		super(FIELD_NAME);
 		setWidth(300);
@@ -79,7 +88,6 @@ public class HighPcodeFieldFactory extends FieldFactory {
 
 	public HighPcodeFieldFactory(String name, FieldFormatModel model,
 			ListingHighlightProvider highlightProvider, Options displayOptions, Options fieldOptions) {
-
 		super(name, model, highlightProvider, displayOptions, fieldOptions);
 		setWidth(300);
 
@@ -93,7 +101,6 @@ public class HighPcodeFieldFactory extends FieldFactory {
 	@Override
 	public FieldFactory newInstance(FieldFormatModel myModel, ListingHighlightProvider highlightProvider,
 			ToolOptions options, ToolOptions fieldOptions) {
-
 		return new HighPcodeFieldFactory(FIELD_NAME, myModel, highlightProvider, options, fieldOptions);
 	}
 
@@ -105,22 +112,15 @@ public class HighPcodeFieldFactory extends FieldFactory {
 			return null;
 		}
 		Instruction instruction = (Instruction) obj;
-		
-		program = instruction.getProgram();   // NEWNEWNEW
-		
-		if(DEBUG_MODE){
-			System.out.print("\n---------------------------------------------------------------- ");
-			System.out.print("\n-------------- HighPcodeFieldFactory() getField() -------------- ");
-			System.out.print("\n------------- instruction address = " + instruction.getAddress() + "------------------- ");
-			System.out.print("\n---------------------------------------------------------------- \n");
-		}
+		program = instruction.getProgram();
+
 		DecompInterface ifc = new DecompInterface();
 		DecompileOptions options = new DecompileOptions();
 		ifc.setOptions(options);
 
-		HighFunction highFunc = null;
 		Function func = getFunc(instruction);
-		
+		HighFunction highFunc = null;
+
 		if (func == null) {
 			System.out.print("(func == null): No Function at current location\n");
 			return null;
@@ -133,18 +133,22 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		}
 
 		ArrayList<TextFieldElement> textFieldElements = new ArrayList<>();
-		List<PcodeOp> highPcodeOps = getHighPcodeOps(highFunc, instruction.getAddress());
 
-		if (displayAlternativeSyntax) {  // display alternative syntax (identical to 'Graph Control Flow' syntax)
-			PcodeOp[] pcodeOpArray = highPcodeOps.toArray(new PcodeOp[highPcodeOps.size()]);
+		if (displayAlternativeSyntax) {  // display alternative syntax (like 'Graph Control Flow') 
+			List<PcodeOpPlusMessage> highPcodeOpsPlusMessages = getHighPcodeOpsPlusMsg(highFunc, instruction.getAddress());
 
-			int lineCnt = pcodeOpArray.length;
+			PcodeOpPlusMessage[] pcodeOpPlusMsgArray = highPcodeOpsPlusMessages.toArray(new PcodeOpPlusMessage[highPcodeOpsPlusMessages.size()]);
+
+			int lineCnt = pcodeOpPlusMsgArray.length;
+
 			for (int i = 0 ; i < lineCnt && i < maxDisplayLines ; i++) {
-				AttributedString as = formatOp(pcodeOpArray[i]);
+				AttributedString as = formatOp(pcodeOpPlusMsgArray[i]);
 				textFieldElements.add(new TextFieldElement(as, i, 0));
 			}
 		}
 		else {  // display Pcode syntax
+			List<PcodeOp> highPcodeOps = getHighPcodeOps(highFunc, instruction.getAddress());
+
 			List<AttributedString> highPcodeListing = formatter.formatOps(instruction.getProgram().getLanguage(),
 					instruction.getProgram().getAddressFactory(), highPcodeOps);
 
@@ -162,52 +166,134 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		return null;
 	}
 
-	List<PcodeOp> getHighPcodeOps(HighFunction hf, Address address) {
-		List<PcodeOp> highPcodeOps = new ArrayList<>();
+	List<PcodeOpPlusMessage> getHighPcodeOpsPlusMsg(HighFunction hf, Address address) {
+		// PcodeOp.getSeqnum().getOrder() represents the order for execution of PcodeOp's.
+		// Order of PcodeOp addresses ideally should correspond to PcodeOp.getSeqnum().getOrder().
+		// Example: A and B are addresses. We expect the order A>B>B in a block. Issue: Occasionally B>A>B might occur!
+		// So, when representing High Pcode on address level, an incorrect execution order might be represented.
+		// In these cases, a warning message is added to the corresponding instructions A and B.
+
+		List<PcodeOpPlusMessage> highPcodeOpsPlusMsg = new ArrayList<>();
 
 		Iterator<PcodeBlockBasic> pblockIter = hf.getBasicBlocks().iterator();
 
-		if(DEBUG_MODE){
-			System.out.print("getHighPcode : address = " + address + "\n");
+		while (pblockIter.hasNext()) {
+			PcodeBlockBasic block = pblockIter.next();
+			Iterator<PcodeOp> opIter = block.getIterator();
+
+			Address previousPcodeOpAddress = null;
+			int linesToDisplay = 0;
+
+			boolean addressOrderMismatch = addressOrderMismatch(block);
+			int blockSize = -1;
+			if (addressOrderMismatch) {
+				blockSize = countBlockPcodeOps(block);
+			}
+
+			while (opIter.hasNext()) {
+				PcodeOp pcodeOp = opIter.next();
+				Address pcodeOpAddress = pcodeOp.getSeqnum().getTarget();
+				String msg = null;
+
+				if (pcodeOpAddress.equals(address)) {   // Then display this pcodeOp
+					if (addressOrderMismatch) {         // Then display additional info
+						msg = "(order " + pcodeOp.getSeqnum().getOrder() + ")";
+						if (pcodeOp.getSeqnum().getOrder() == 0) {
+							msg += " <BEGIN>";
+						}
+						else if (pcodeOp.getSeqnum().getOrder() == blockSize-1) {
+							msg += " <END>";
+						}
+						if (previousPcodeOpAddress != null &&
+								pcodeOpAddress.compareTo(previousPcodeOpAddress) < 0) {  // B in C>B.
+							// Address B but based on order, it executes after C.
+							msg += " INSTRUCTION EXECUTES AT " + previousPcodeOpAddress;
+						}
+						else if (previousPcodeOpAddress != null &&
+								linesToDisplay > 0 &&
+								pcodeOpAddress.compareTo(previousPcodeOpAddress) > 0) {  // Second B in B>A>B.
+							// Previous address was A but prior to that we found B instruction.
+							msg += " INSTRUCTION AT " + previousPcodeOpAddress + " EXECUTES PRIOR";
+						}
+					}
+					highPcodeOpsPlusMsg.add(new PcodeOpPlusMessage(pcodeOp, msg));
+					linesToDisplay++;
+				}
+				previousPcodeOpAddress = pcodeOpAddress;
+			}
 		}
+		return highPcodeOpsPlusMsg;
+	}
+
+	int countBlockPcodeOps (PcodeBlockBasic block) {
+		int count = 0;
+		Iterator<PcodeOp> opIter = block.getIterator();
+		while (opIter.hasNext()) {
+			count++;
+			opIter.next();
+		}
+		return count;
+	}
+
+	boolean addressOrderMismatch(PcodeBlockBasic block) {
+		Iterator<PcodeOp> opIter = block.getIterator();
+
+		Address previousPcodeOpAddress = null;
+
+		while (opIter.hasNext()) {
+			PcodeOp pcodeOp = opIter.next();
+			Address pcodeOpAddress = pcodeOp.getSeqnum().getTarget();
+
+			if (previousPcodeOpAddress != null && pcodeOpAddress.compareTo(previousPcodeOpAddress) < 0) {
+				return true;  // addresses are not in order
+			}
+			previousPcodeOpAddress = pcodeOpAddress;
+		}
+		return false;
+	}
+
+	List<PcodeOp> getHighPcodeOps(HighFunction hf, Address address) {
+		List<PcodeOp> highPcodeOps = new ArrayList<>();
+		Iterator<PcodeBlockBasic> pblockIter = hf.getBasicBlocks().iterator();
 
 		while (pblockIter.hasNext()) {
 			PcodeBlockBasic block = pblockIter.next();
 			Iterator<PcodeOp> opIter = block.getIterator();
 
 			while (opIter.hasNext()) {
-				PcodeOp op = opIter.next();
-				Address op_address = op.getSeqnum().getTarget();
+				PcodeOp pcodeOp = opIter.next();
+				Address pcodeOpAddress = pcodeOp.getSeqnum().getTarget();
 
-				if(DEBUG_MODE){
-					System.out.print("getHighPcode : op_address = " + op_address + "\n");
-				}
-
-				if (op_address.equals(address)) {
-					highPcodeOps.add(op);
+				if (pcodeOpAddress.equals(address)) {
+					highPcodeOps.add(pcodeOp);   // to be displayed
 				}
 			}
 		}
 		return highPcodeOps;
 	}
 
-	private AttributedString formatOp(PcodeOp op) {
-		List<AttributedString> lineList = new ArrayList<>();  // one line
-		Varnode output = op.getOutput();
+	private AttributedString formatOp(PcodeOpPlusMessage op) {
+		List<AttributedString> lineList = new ArrayList<>();  // lineList will contain 1 line
+		Varnode output = op.pcodeOp.getOutput();
 
 		if (output != null) {
 			lineList.add(translateVarnode(output, true));
 			lineList.add(new AttributedString(" = ", ListingColors.SEPARATOR, getMetrics()));
 		}
-		lineList.add(formatOpMnemonic(op));
+		lineList.add(formatOpMnemonic(op.pcodeOp));
 		lineList.add(new AttributedString(" ", ListingColors.SEPARATOR, getMetrics()));
 
-		Varnode[] inputs = op.getInputs();
+		Varnode[] inputs = op.pcodeOp.getInputs();
 		for (int i = 0; i < inputs.length; i++) {
 			if (i != 0) {
 				lineList.add(new AttributedString(",", ListingColors.SEPARATOR, getMetrics()));
 			}
 			lineList.add(translateVarnode(inputs[i], true));
+		}
+
+		if (op.message != null) {
+			lineList.add(new AttributedString(" ", ListingColors.BACKGROUND, getMetrics()));
+			lineList.add(new AttributedString(op.message, ListingColors.SEPARATOR, getMetrics(), true, ListingColors.SEPARATOR));
 		}
 		return new CompositeAttributedString(lineList);
 	}
@@ -318,11 +404,6 @@ public class HighPcodeFieldFactory extends FieldFactory {
 			strings.add(attributedString.getText());
 		}
 
-		if(DEBUG_MODE){
-			System.out.print("getProgramLocation : highFunc = " + highFunc.toString() + "\n");
-			System.out.print("getProgramLocation : getHighPcode(..) = " + getHighPcodeOps(highFunc, instr.getAddress()) + "\n");
-			System.out.print("getProgramLocation : strings = " + strings + "\n");
-		}
 		return new HighPcodeFieldLocation(prog, instr.getAddress(), strings, row, col);
 	}
 
@@ -355,13 +436,13 @@ public class HighPcodeFieldFactory extends FieldFactory {
 
 	private void setOptions(Options fieldOptions) {
 		fieldOptions.registerOption(DISPLAY_ALTERNATIVE_SYNTAX, true, null,
-				"Alternative syntax like in Graph Control Flow");
+				"Graph Control Flow (alternative) style syntax. Shows warning when execution order deviates from address order. Warning is not shown for Pcode style syntax.");
 		fieldOptions.registerOption(MAX_DISPLAY_LINES_MSG, MAX_DISPLAY_LINES, null,
 				"Max number line of High Pcode to display");
 
 		displayAlternativeSyntax = fieldOptions.getBoolean(DISPLAY_ALTERNATIVE_SYNTAX, true);
 		maxDisplayLines = fieldOptions.getInt(MAX_DISPLAY_LINES_MSG, MAX_DISPLAY_LINES);
-		
+
 		formatter.setOptions(maxDisplayLines, false);
 	}
 
