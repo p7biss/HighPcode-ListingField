@@ -114,10 +114,6 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		Instruction instruction = (Instruction) obj;
 		program = instruction.getProgram();
 
-		DecompInterface ifc = new DecompInterface();
-		DecompileOptions options = new DecompileOptions();
-		ifc.setOptions(options);
-
 		Function func = getFunc(instruction);
 		HighFunction highFunc = null;
 
@@ -149,9 +145,9 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		else {  // display Pcode syntax
 			List<PcodeOp> highPcodeOps = getHighPcodeOps(highFunc, instruction.getAddress());
 
-			List<AttributedString> highPcodeListing = formatter.formatOps(instruction.getProgram().getLanguage(),
-					instruction.getProgram().getAddressFactory(), highPcodeOps);
-
+			List<AttributedString> highPcodeListing = formatter.formatOps(program.getLanguage(),
+					program.getAddressFactory(), highPcodeOps);
+			
 			int lineCnt = highPcodeListing.size();
 			for (int i = 0; i < lineCnt; i++) {
 				textFieldElements.add(new TextFieldElement(highPcodeListing.get(i), i, 0));
