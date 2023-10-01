@@ -69,6 +69,7 @@ public class HighPcodeFieldFactory extends FieldFactory {
 	int maxDisplayLines = Integer.MAX_VALUE;
 
 	private Program program;
+	private DecompInterface ifc;
 	private AttributedStringHighPcodeFormatter formatter;
 
 	class PcodeOpPlusMessage {   // used for the alternative syntax
@@ -96,6 +97,12 @@ public class HighPcodeFieldFactory extends FieldFactory {
 
 		setOptions(fieldOptions);
 		formatter.setFontMetrics(getMetrics());
+
+		DecompileOptions options = new DecompileOptions();
+		ifc = new DecompInterface();
+		ifc.setOptions(options);
+		ifc.setSimplificationStyle("decompile"); // show HighVar names
+		//ifc.setSimplificationStyle("normalize");
 	}
 
 	@Override
@@ -114,19 +121,21 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		Instruction instruction = (Instruction) obj;
 		program = instruction.getProgram();
 
-		Function func = getFunc(instruction);
-		HighFunction highFunc = null;
+		try {
+			if (!ifc.openProgram(instruction.getProgram())) {
+				throw new DecompileException("Decompiler", "Unable to initialize: " + ifc.getLastMessage());
+			}
+		} catch (DecompileException e) {
+			e.printStackTrace();
+		}
 
+		Function func = getFunc(instruction);
 		if (func == null) {
 			System.out.print("(func == null): No Function at current location\n");
 			return null;
 		}
-		try {
-			highFunc = getHighFunc(instruction);
-		} catch (DecompileException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+
+		HighFunction highFunc = getHighFunc(instruction);
 
 		ArrayList<TextFieldElement> textFieldElements = new ArrayList<>();
 
@@ -147,7 +156,7 @@ public class HighPcodeFieldFactory extends FieldFactory {
 
 			List<AttributedString> highPcodeListing = formatter.formatOps(program.getLanguage(),
 					program.getAddressFactory(), highPcodeOps);
-			
+
 			int lineCnt = highPcodeListing.size();
 			for (int i = 0; i < lineCnt; i++) {
 				textFieldElements.add(new TextFieldElement(highPcodeListing.get(i), i, 0));
@@ -384,14 +393,8 @@ public class HighPcodeFieldFactory extends FieldFactory {
 
 		Instruction instr = (Instruction) obj;
 		Program prog = instr.getProgram();
-		HighFunction highFunc = null;
 
-		try {
-			highFunc = getHighFunc(instr);
-		} catch (DecompileException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+		HighFunction highFunc = getHighFunc(instr);
 
 		List<AttributedString> attributedStrings = formatter.formatOps(prog.getLanguage(),
 				prog.getAddressFactory(), getHighPcodeOps(highFunc, instr.getAddress()));
@@ -447,17 +450,7 @@ public class HighPcodeFieldFactory extends FieldFactory {
 		return flat.getFunctionContaining(instr.getAddress());
 	}
 
-	private HighFunction getHighFunc(Instruction instr) throws DecompileException {
-		DecompileOptions options = new DecompileOptions();
-		DecompInterface ifc = new DecompInterface();
-		ifc.setOptions(options);
-
-		if (!ifc.openProgram(instr.getProgram())) {
-			throw new DecompileException("Decompiler", "Unable to initialize: " + ifc.getLastMessage());
-		}
-		ifc.setSimplificationStyle("decompile"); // show HighVar names
-		//ifc.setSimplificationStyle("normalize");
-
+	private HighFunction getHighFunc(Instruction instr) {
 		Function function = getFunc(instr);
 
 		DecompileResults res = ifc.decompileFunction(function, 30, null);
